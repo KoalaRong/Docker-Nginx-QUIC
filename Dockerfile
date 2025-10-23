@@ -1,9 +1,6 @@
-ARG ALPINE_VERSION="3.21"
+ARG ALPINE_VERSION="3.22"
 
 FROM golang:alpine${ALPINE_VERSION} AS boringssl_builder
-
-ARG HTTP_PROXY="http://192.168.70.116:7890"
-ARG HTTPS_PROXY="http://192.168.70.116:7890"
 
 RUN set -x \
 	# use tuna mirrors 
@@ -16,16 +13,14 @@ RUN set -x \
 	&& apk add --no-cache --virtual .build-deps \
 	git cmake samurai libstdc++ build-base perl-dev linux-headers libunwind-dev \
 	&& mkdir -p /usr/local/src \
-	&& git clone --depth=1 -b master https://github.com/google/boringssl.git /usr/local/src/boringssl \
-	&& cd /usr/local/src/boringssl && mkdir build && cd build && cmake .. \
+	&& git clone --depth=1 -b main https://github.com/google/boringssl.git /usr/local/src/boringssl \
+	&& cd /usr/local/src/boringssl && mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release\
 	&& make -j$(getconf _NPROCESSORS_ONLN) \
     && apk del --no-network .build-deps
 
 FROM alpine:${ALPINE_VERSION} AS nginx_builder
 
-ARG HTTP_PROXY="http://192.168.70.116:7890"
-ARG HTTPS_PROXY="http://192.168.70.116:7890"
-ARG NGINX_VERSION="1.27.4"
+ARG NGINX_VERSION="1.29.2"
 # https://nginx.org/en/download.html
 
 WORKDIR /usr/local/src
@@ -62,7 +57,7 @@ RUN --mount=type=bind,from=boringssl_builder,source=/usr/local/src/boringssl,tar
 	build-base \
 	wget \
 	# ngx_brotli
-	&& git clone https://github.com/google/ngx_brotli.git /usr/local/src/ngx_brotli \
+	&& git clone --depth=1 https://github.com/google/ngx_brotli.git /usr/local/src/ngx_brotli \
 	&& cd /usr/local/src/ngx_brotli \
 	&& git submodule update --init \
 	# nginx	
@@ -117,7 +112,6 @@ RUN --mount=type=bind,from=boringssl_builder,source=/usr/local/src/boringssl,tar
 	--with-mail \
 	--with-mail_ssl_module \
 	--with-stream \
-	#--with-stream_quic_module \
 	--with-stream_realip_module \
 	--with-stream_ssl_module \
 	--with-stream_ssl_preread_module\
@@ -126,7 +120,7 @@ RUN --mount=type=bind,from=boringssl_builder,source=/usr/local/src/boringssl,tar
 	--with-pcre-jit \
 	--with-cc=c++ \
 	--with-cc-opt='-I../boringssl/include -x c -m64 -O3 -g -DTCP_FASTOPEN=23 -ffast-math -march=native -flto -fstack-protector-strong -fomit-frame-pointer -fPIC -Wformat -Wdate-time -D_FORTIFY_SOURCE=2' \
-	--with-ld-opt='-L../boringssl/build/ssl -L../boringssl/build/crypto -Wl,-z,relro -Wl,-z,now -fPIC -lrt ' \
+	--with-ld-opt='-L../boringssl/build -lssl -lcrypto -lstdc++ -lpthread -lm -fPIC -lrt' \
 	--add-module=/usr/local/src/ngx_brotli \
 	&& make -j$(getconf _NPROCESSORS_ONLN) \
 	&& make install \
